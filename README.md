@@ -30,7 +30,9 @@ plugin_manager install_bundle github:lone-wolf-akela/dsh-remote-ssh
 
 A clone works too — point `install_bundle` at the directory. The bundle is a
 package-root Host plugin plus a `dsh.client` browser half, so one Loader row
-serves both. It depends on `ssh2`, which is installed with the package.
+serves both. It depends on `ssh2`, which is installed with the package; pnpm asks
+whether to run two optional build scripts that cannot succeed under Electron, and
+the plugin works without them — see [Native dependencies](#native-dependencies-why-ssh2-runs-pure-javascript-here).
 Tested on DSH 0.2.2-rc.3 (and 0.2.2-rc.1 before it); the credential-key handling
 below is what changed between those two, and `scripts/repair-credentials.mjs`
 upgrades records written by 0.1.0.
@@ -87,6 +89,56 @@ upgrades records written by 0.1.0.
   policies or unusual authentication (hardware tokens, keyboard-interactive
   challenge chains) may not work.
 
+## Native dependencies (why ssh2 runs pure JavaScript here)
+
+`ssh2` declares two optional native accelerators. Neither is required — the
+transport falls back to pure JavaScript and everything works — but installing from
+a git URL surfaces both, and the first error is misleading.
+
+1. **pnpm refuses the build scripts.** `install_bundle` answers
+   `ERR_PNPM_IGNORED_BUILDS: cpu-features@0.0.10, ssh2@1.17.0` and rolls the
+   install back. Approve them (`approvedBuilds`); the approval is remembered for
+   the profile.
+2. **Both builds then fail with**
+   `gyp: name 'enable_thin_lto' is not defined while evaluating condition 'enable_thin_lto=="true"'`.
+   Root cause, confirmed on DSH 0.2.2-rc.3 (Electron 44.7.0):
+   - Node 24's `common.gypi` evaluates `enable_thin_lto` inside its
+     `msvc_settings` block, and gyp hard-fails on an undefined variable in a
+     condition — which is why this only breaks Windows.
+   - The variable is defined only by the headers' own `config.gypi`.
+   - node-gyp reads that file only when `--nodedir`/`--dist-url` is given;
+     otherwise it generates the project's `config.gypi` from the `process.config`
+     of the process running node-gyp — here Electron, whose `variables` carry
+     `enable_lto` but no `enable_thin_lto`/`lto_jobs`.
+   - Proof: the same `node-gyp configure` with `--nodedir=<node-gyp cache>/24.21.0`
+     succeeds.
+3. **A successful build must also match Electron's ABI.** Electron 44.7.0 is
+   `NODE_MODULE_VERSION` 149, while the downloaded Node headers are a different
+   ABI, so `cpu-features` loads only when it is compiled against *Electron*
+   headers:
+
+   ```
+   node-gyp configure build --dist-url=https://artifacts.electronjs.org/headers/dist \
+     --target=44.7.0 --arch=x64        # target = process.versions.electron
+   ```
+
+   That works, and still buys nothing: `ssh2` consults `cpu-features` only when
+   its native crypto binding is available (`lib/protocol/constants.js`).
+4. **The crypto binding cannot be built for Electron at all.** Its
+   `src/binding.cc` includes `<openssl/evp.h>`, `<openssl/hmac.h>` and
+   `<openssl/err.h>`. Electron's header bundle ships no `openssl/` directory
+   (Electron uses BoringSSL), so the compile stops at
+   `C1083: cannot open include file: 'openssl/configuration.h'`. Node's headers do
+   ship `openssl/`, so building against them compiles — but that produces a
+   Node-ABI module (the binding uses NAN, not N-API, so it is ABI-bound), and
+   Electron's BoringSSL is not ABI-compatible with the OpenSSL it was compiled
+   against. There is no ABI-stable route around this.
+
+**The expected state under Electron is therefore pure-JS crypto.** It is what this
+plugin is tested with: correctness is unaffected, and only large transfers pay a
+CPU cost. A pnpm log line saying `Failed to build optional crypto binding` is this,
+and it is harmless.
+
 ## Troubleshooting
 
 | Symptom | Look at |
@@ -96,6 +148,8 @@ upgrades records written by 0.1.0.
 | "No password is saved for this server" | Edit the server and enter a password; **Test** reports the same failure. |
 | "No usable private key was found" | The settings row shows a *key file missing* badge; set the key path explicitly. |
 | Unexpected RPC errors | `$DSH_HOME/state/dsh-remote-ssh/host.log` records activation, saved servers and RPC failures. |
+| Install stops at `ERR_PNPM_IGNORED_BUILDS` and rolls back | pnpm is waiting for build-script approval; approve `ssh2` and `cpu-features` when asked. See [Native dependencies](#native-dependencies-why-ssh2-runs-pure-javascript-here). |
+| pnpm log shows `enable_thin_lto is not defined` or `Failed to build optional crypto binding` | Expected on Windows under Electron, and harmless: the plugin runs with pure-JS crypto. See [Native dependencies](#native-dependencies-why-ssh2-runs-pure-javascript-here). |
 
 ## Upgrading
 

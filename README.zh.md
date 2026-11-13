@@ -22,7 +22,7 @@
 plugin_manager install_bundle github:lone-wolf-akela/dsh-remote-ssh
 ```
 
-也可以把 `install_bundle` 指向本地 clone 的目录。这是一个「包根插件」：Host 半边加一个 `dsh.client` 浏览器半边，一个 Loader 条目同时提供两者。它依赖 `ssh2`，随包一起安装。已在 DSH 0.2.2-rc.3（以及之前的 0.2.2-rc.1）上验证；两版之间变的是下面这段凭据键处理，`scripts/repair-credentials.mjs` 可以把 0.1.0 写下的记录迁移过来。
+也可以把 `install_bundle` 指向本地 clone 的目录。这是一个「包根插件」：Host 半边加一个 `dsh.client` 浏览器半边，一个 Loader 条目同时提供两者。它依赖 `ssh2`，随包一起安装；pnpm 会请求执行两个在 Electron 下注定失败的**可选**构建脚本，不执行也完全能用，原因见下面的[原生依赖](#原生依赖为什么-ssh2-跑纯-js)一节。已在 DSH 0.2.2-rc.3（以及之前的 0.2.2-rc.1）上验证；两版之间变的是下面这段凭据键处理，`scripts/repair-credentials.mjs` 可以把 0.1.0 写下的记录迁移过来。
 
 ## 使用
 
@@ -51,6 +51,28 @@ plugin_manager install_bundle github:lone-wolf-akela/dsh-remote-ssh
 - **远端相对路径相对于家目录。** `~/x` 会被规范成 `x`。
 - **依赖 `ssh2`。** 使用严格 `Match`/`ForceCommand` 策略或特殊认证（硬件令牌、多轮键盘交互）的服务器可能不适用。
 
+## 原生依赖：为什么 ssh2 跑纯 JS
+
+`ssh2` 声明了两个**可选**的原生加速模块。都不是必需的——缺了会回退到纯 JS，功能完整——但从 git 地址安装时这两个都会被翻出来，而第一个报错很有误导性。
+
+1. **pnpm 先拦下构建脚本。** `install_bundle` 报 `ERR_PNPM_IGNORED_BUILDS: cpu-features@0.0.10, ssh2@1.17.0` 并**整体回滚**安装。批准它们（`approvedBuilds`）即可，批准结果对该 profile 持久生效。
+2. **批准后两个构建都会失败**，报 `gyp: name 'enable_thin_lto' is not defined while evaluating condition 'enable_thin_lto=="true"'`。根因（在 DSH 0.2.2-rc.3 / Electron 44.7.0 上实测）：
+   - Node 24 的 `common.gypi` 在 **`msvc_settings`** 段里求值 `enable_thin_lto`，而 gyp 对条件中未定义的变量是**硬失败**——所以只有 Windows 会炸。
+   - 这个变量只由 Node 头文件自带的 `config.gypi` 定义。
+   - node-gyp 只在传了 `--nodedir`/`--dist-url` 时才读那个文件；否则它用**运行 node-gyp 的进程**的 `process.config` 生成项目的 `config.gypi`——这里是 Electron，它的 `variables` 有 `enable_lto` 却没有 `enable_thin_lto`/`lto_jobs`。
+   - 反证：同样的 `node-gyp configure` 加上 `--nodedir=<node-gyp 缓存>/24.21.0` 就能通过。
+3. **就算编成功，还得匹配 Electron 的 ABI。** Electron 44.7.0 是 `NODE_MODULE_VERSION` **149**，而下载的 Node 头文件是另一个 ABI，所以 `cpu-features` 只有按 **Electron 头文件**编译才能加载：
+
+   ```
+   node-gyp configure build --dist-url=https://artifacts.electronjs.org/headers/dist \
+     --target=44.7.0 --arch=x64        # target 取 process.versions.electron
+   ```
+
+   这样确实能编出来并加载，但**没有任何收益**：ssh2 只在原生加密绑定可用时才参考 `cpu-features`（`lib/protocol/constants.js`）。
+4. **加密绑定在 Electron 下根本编不出来。** 它的 `src/binding.cc` 包含 `<openssl/evp.h>`、`<openssl/hmac.h>`、`<openssl/err.h>`。Electron 的头文件包里**没有 `openssl/`**（Electron 用 BoringSSL），编译直接停在 `C1083: 无法打开包括文件: 'openssl/configuration.h'`。Node 的头文件里有 `openssl/`，所以按 Node 头文件能编——但产出的是 **Node-ABI** 模块（该绑定用 NAN 而非 N-API，天然与 ABI 绑定），而 Electron 的 BoringSSL 与它编译时用的 OpenSSL 在 ABI 上并不兼容，也没有跨 ABI 的稳定退路。
+
+**因此在 Electron 下，预期就是纯 JS 加密。** 本插件正是这样测试通过的：正确性不受影响，只有大文件传输会多花一点 CPU。pnpm 日志里的 `Failed to build optional crypto binding` 就是这事，可以忽略。
+
 ## 排查
 
 | 现象 | 检查 |
@@ -60,6 +82,8 @@ plugin_manager install_bundle github:lone-wolf-akela/dsh-remote-ssh
 | 提示「这台服务器还没有保存密码」 | 编辑该服务器补充密码；「测试连接」会报同样的错。 |
 | 提示「没有找到可用的私钥」 | 该行会显示「私钥缺失」标记，请显式填写私钥路径。 |
 | 其他 RPC 报错 | `$DSH_HOME/state/dsh-remote-ssh/host.log` 记录了激活、保存和 RPC 失败。 |
+| 安装停在 `ERR_PNPM_IGNORED_BUILDS` 并回滚 | pnpm 在等构建脚本批准；按提示批准 `ssh2` 和 `cpu-features` 即可。详见[原生依赖](#原生依赖为什么-ssh2-跑纯-js)。 |
+| pnpm 日志出现 `enable_thin_lto is not defined` 或 `Failed to build optional crypto binding` | Windows + Electron 下的预期结果，无害：插件用纯 JS 加密运行。详见[原生依赖](#原生依赖为什么-ssh2-跑纯-js)。 |
 
 ## 升级
 
