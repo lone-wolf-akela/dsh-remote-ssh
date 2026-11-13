@@ -1,0 +1,9 @@
+# dsh-remote-ssh — the bundle layer.
+#
+# One row, package-root plugin: the same file exports the Host half and (through
+# `dsh.client`) the browser half, so a single entry serves the settings page, the
+# conversation header button and the model tools.
+- insert:
+    - id: remote-ssh
+      name: '@local/dsh-remote-ssh'
+      config: {}

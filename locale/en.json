@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Remote SSH",
+    "description": "Keep a catalog of SSH servers in Settings, choose in each conversation which of them the agent may use, and let it run commands and move files over SSH — through a jump host when one is configured."
+  }
+}

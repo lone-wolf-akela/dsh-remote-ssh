@@ -1,0 +1,65 @@
+{
+  "name": "@local/dsh-remote-ssh",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Remote SSH: keep a catalog of SSH servers in Settings, open the ones a conversation may use from its header, and let the agent run commands and move files over SSH, jump hosts included.",
+  "type": "module",
+  "license": "MIT",
+  "author": "lone-wolf-akela",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lone-wolf-akela/dsh-remote-ssh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lone-wolf-akela/dsh-remote-ssh/issues"
+  },
+  "homepage": "https://github.com/lone-wolf-akela/dsh-remote-ssh#readme",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "ssh",
+    "remote",
+    "jump-host"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "lib",
+    "scripts",
+    "test",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "repair-credentials": "node scripts/repair-credentials.mjs",
+    "test:ssh": "node test/ssh.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "dependencies": {
+    "ssh2": "^1.17.0"
+  }
+}

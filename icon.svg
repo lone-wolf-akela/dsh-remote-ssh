@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Remote SSH: one host reached over a jump. Original artwork from primitives. -->
+  <rect x="9" y="12" width="38" height="40" rx="8" fill="none" stroke="currentColor" stroke-opacity="0.45" stroke-width="3.6"/>
+  <path d="M9 32h38" stroke="currentColor" stroke-opacity="0.45" stroke-width="3.6"/>
+  <circle cx="18" cy="22" r="3.4" fill="#2f9e8f"/>
+  <circle cx="18" cy="42" r="3.4" fill="currentColor" fill-opacity="0.6"/>
+  <path d="M27 22h12M27 42h12" stroke="currentColor" stroke-opacity="0.5" stroke-width="3.6" stroke-linecap="round"/>
+  <!-- The jump: an arc out to a second point of presence. -->
+  <path d="M48 25c6 3 6 11 0 14" fill="none" stroke="#2f9e8f" stroke-width="3.6" stroke-linecap="round"/>
+  <circle cx="56" cy="32" r="4.6" fill="#2f9e8f"/>
+</svg>
