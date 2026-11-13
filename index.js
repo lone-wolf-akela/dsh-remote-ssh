@@ -645,13 +645,16 @@ export function apply(ctx) {
 
   const deps = { store, credentialsOf }
 
-  // The browser channel needs the Web carrier; a composition without it keeps
-  // the model tools and skips the page-facing half.
-  const webServer = ctx.get('webServer')
-  if (webServer !== undefined && typeof webServer.register === 'function') {
-    ctx.effect(
+  // The browser channel needs the Web carrier — but a fresh boot activates
+  // plugins before the carrier exists, so reading the service at `apply` time
+  // silently lost the route and left the settings page unable to load. The
+  // child context below waits for `webServer`, keeps this plugin active in a
+  // composition that never gets one (headless, ACP), and disposes the route
+  // with the carrier.
+  ctx.inject(['webServer'], (carrierCtx) => {
+    carrierCtx.effect(
       () =>
-        webServer.register({
+        carrierCtx.webServer.register({
           kind: 'prefix',
           path: CHANNEL,
           handler: (req, res) => {
@@ -668,9 +671,7 @@ export function apply(ctx) {
       'remote-ssh: rpc route',
     )
     logDebug('rpc channel registered')
-  } else {
-    logDebug('no web carrier; the browser settings page is unavailable in this composition')
-  }
+  })
 
   registerTools(ctx, store, credentialsOf)
   logDebug(`activated with ${store.servers().length} server(s)`)
@@ -679,8 +680,9 @@ export function apply(ctx) {
 /**
  * Hard dependencies.
  *
- * `tools` carries the model tools. The browser half reaches the Web carrier and
- * the Connection service through `ctx.get(...)`, so a composition without them
- * (headless, ACP) still loads this plugin with its tools only.
+ * `tools` carries the model tools. The browser half resolves the Connection
+ * service per request and registers its route through a child context that
+ * injects `webServer`, so a composition without either still loads this plugin
+ * with its tools only.
  */
 export const inject = ['tools']
