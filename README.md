@@ -139,6 +139,22 @@ plugin is tested with: correctness is unaffected, and only large transfers pay a
 CPU cost. A pnpm log line saying `Failed to build optional crypto binding` is this,
 and it is harmless.
 
+**Silencing the noise.** Approving the scripts (`true` in the profile's
+`pnpm-workspace.yaml` under `allowBuilds`) makes pnpm *run* them on every install
+pass that touches the package, so the same gyp failure reappears whenever another
+plugin is installed. Declare them declined instead: pnpm then skips them without
+building and without the ignored-builds error.
+
+```yaml
+# <profile>/pnpm-workspace.yaml
+allowBuilds:
+  cpu-features@0.0.10: false
+  ssh2@1.17.0: false
+```
+
+The keys are version-pinned, so a dependency bump brings the gate back once;
+setting the new version to `false` settles it again.
+
 ## Troubleshooting
 
 | Symptom | Look at |

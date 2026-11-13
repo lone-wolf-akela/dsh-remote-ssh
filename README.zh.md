@@ -73,6 +73,17 @@ plugin_manager install_bundle github:lone-wolf-akela/dsh-remote-ssh
 
 **因此在 Electron 下，预期就是纯 JS 加密。** 本插件正是这样测试通过的：正确性不受影响，只有大文件传输会多花一点 CPU。pnpm 日志里的 `Failed to build optional crypto binding` 就是这事，可以忽略。
 
+**想让日志彻底安静**：把这俩在 profile 的 `pnpm-workspace.yaml` 里从「批准」改成「拒绝」，pnpm 就会**既不构建、也不报 ignored-builds 错误**地跳过它们（`true` 会让 pnpm 每次安装都真的去跑脚本，于是每装一个新插件就把同一段 gyp 报错刷一遍）：
+
+```yaml
+# <profile>/pnpm-workspace.yaml
+allowBuilds:
+  cpu-features@0.0.10: false
+  ssh2@1.17.0: false
+```
+
+这些键带版本号：依赖升版后闸门会重新出现一次，把新版本同样设成 `false` 即可。
+
 ## 排查
 
 | 现象 | 检查 |
