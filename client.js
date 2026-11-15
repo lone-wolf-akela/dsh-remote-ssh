@@ -6,7 +6,9 @@
  *
  *   1. `settings.section`  the settings page that maintains the server catalog,
  *   2. `conversation.session.header.utilities`  the compact button at the top
- *      right of a conversation,
+ *      right of a conversation, and `conversation.hero.options`  the same
+ *      control in the New Session row, because the header hides all of its
+ *      chrome — utilities included — while a Session is still blank,
  *   3. `shell.overlay`  the popover that button opens. It lives in the overlay
  *      slot because the header clips its own overflow; that slot is
  *      click-through and this entry opts back into pointer events only while
@@ -82,6 +84,7 @@ window.__ModuleLoader__.load({
         'menu.count': '{count} open to the agent',
         'menu.loading': 'Loading…',
         'menu.open': 'SSH servers for this conversation',
+        'menu.chip': 'SSH',
         'error.bad-request': 'Some fields are missing or invalid.',
         'error.no-servers': 'No SSH server is shared with this conversation.',
         'error.unknown-server': 'That server no longer exists.',
@@ -145,6 +148,7 @@ window.__ModuleLoader__.load({
         'menu.count': '已开放 {count} 台',
         'menu.loading': '加载中…',
         'menu.open': '本对话的 SSH 服务器',
+        'menu.chip': 'SSH',
         'error.bad-request': '有必填项缺失或填写有误。',
         'error.no-servers': '本对话没有可用服务器。',
         'error.unknown-server': '这台服务器已不存在。',
@@ -209,6 +213,7 @@ window.__ModuleLoader__.load({
       '.rssh-headbtn{position:relative;display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:20px;cursor:pointer}',
       '.rssh-headbtn:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
       '.rssh-headbtn[data-on="true"]{color:var(--dsw-alias-label-primary)}',
+      '.rssh-headbtn-label{font-size:12px;line-height:16px}',
       '.rssh-headbtn-count{font-variant-numeric:tabular-nums;font-size:12px;line-height:16px;padding:0 4px;border-radius:6px;background:var(--dsw-alias-bg-layer-2)}',
       '.rssh-headbtn[data-on="true"] .rssh-headbtn-count{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-base)}',
       /* popover */
@@ -954,14 +959,20 @@ window.__ModuleLoader__.load({
     // ---------------------------------------------------------------------
 
     /**
-     * The compact header button: reports how many servers this conversation has
-     * open and toggles the popover. Every write happens in the popover.
-     * @param props - slot props plus the menu store, RPC facade and translator.
+     * The compact button: reports how many servers this conversation has open
+     * and toggles the popover. Every write happens in the popover.
+     *
+     * It has two seats. In the Session header it joins the other icon buttons,
+     * so it stays glyph-only. In the New Session row it sits among labelled
+     * chips, so `labeled` adds the same short name there: an unlabelled glyph
+     * in a row of words would be the only control a reader has to guess at.
+     * @param props - slot props plus the menu store, RPC facade and translator;
+     *   `labeled` marks the New Session seat.
      * @returns the button.
      */
     function HeaderButton(props) {
       const t = typeof props.t === 'function' ? props.t : props.fallbackT
-      const { menuStore, rpc, sessionId } = props
+      const { menuStore, rpc, sessionId, labeled } = props
       const menu = useStoreValue(menuStore)
       const [count, setCount] = useState(0)
 
@@ -1000,6 +1011,7 @@ window.__ModuleLoader__.load({
           },
         },
         h(Icon, { name: 'dsw-icon-browse-outline-regular' }),
+        labeled === true ? h('span', { className: 'rssh-headbtn-label' }, translate(t, 'menu.chip')) : null,
         count > 0 ? h('span', { className: 'rssh-headbtn-count' }, String(count)) : null,
       )
     }
@@ -1182,6 +1194,20 @@ window.__ModuleLoader__.load({
           ctx.slots.register(
             { name: 'conversation.session.header.utilities', id: 'remote-ssh', order: 30, locale: NS },
             withFacilities(HeaderButton),
+          ),
+        )
+
+        // The header draws no chrome at all while a Session is blank — no
+        // title row utilities, no menu button — so a conversation that has not
+        // sent its first message would have no way to open a server. The host
+        // keeps this seat for that exact state: the row above the New Session
+        // composer, right-aligned after the workspace and preset controls. It
+        // stops rendering once the Session leaves the blank phase, which is
+        // when the header seat above takes over, so the two never overlap.
+        ctx.slots.inject('conversation.hero.options', () =>
+          ctx.slots.register(
+            { name: 'conversation.hero.options', id: 'remote-ssh', order: 30, locale: NS },
+            withFacilities((props) => h(HeaderButton, { ...props, labeled: true })),
           ),
         )
 

@@ -10,7 +10,7 @@ switched on.
 | Surface | Where | What it does |
 |---|---|---|
 | Settings page | Settings → **Remote SSH** | Add, edit, test and remove SSH servers: name, address, port, user, password **or** private key, optional jump host, and a note for the agent. |
-| Header button | Top right of every conversation | Opens a small menu of checkboxes that chooses which servers **this conversation** may use. The button shows how many are open. |
+| Server button | Top right of a conversation's header — and, before its first message, at the right end of the New Session row | Opens a small menu of checkboxes that chooses which servers **this conversation** may use. The button shows how many are open. |
 | `ssh_servers` | model tool | Lists the servers shared with the conversation; `probe: true` also connects to each and reports latency and `uname`. |
 | `ssh_exec` | model tool | Runs a shell command on a shared server and returns exit code, stdout and stderr. |
 | `ssh_transfer` | model tool | Copies one file up or down over SFTP. |
@@ -51,6 +51,10 @@ upgrades records written by 0.1.0.
    - **Test** runs a real connection and reports the round-trip time.
 2. **Open a conversation** and press the button at the top right. Check the
    servers the agent may use there. Each conversation keeps its own selection.
+   A conversation that has not sent its first message yet has no header chrome
+   at all, so the same button waits in its New Session row, right after the
+   workspace and agent-preset controls; it moves up into the header with the
+   first message.
 3. Ask the agent to do something on the machine, for example "check the disk
    usage on the router" or "copy this file to /tmp on the router".
 
@@ -160,7 +164,7 @@ setting the new version to `false` settles it again.
 | Symptom | Look at |
 |---|---|
 | Harness will not start after an upgrade: `startup failed: 1 required plugin did not activate`, `Failed plugins: credentials`, `credential key segment "…" must match /^[a-z][a-z0-9-]*$/` | A record written by version 0.1.0 is still on disk. Quit DSH, run `node scripts/repair-credentials.mjs` (dry run), then `--write`; it re-keys those records to the new `remote-ssh/srv-<hex>` form, keeps the passwords, and backs the file up first. See [Upgrading](#upgrading) below. |
-| The header button is missing | The plugin row must be active; check Plugins → Installed. |
+| The server button is missing | The plugin row must be active; check Plugins → Installed. In a Session that has not sent a message yet it is in the New Session row, not the header — the Harness hides the whole header chrome while a Session is blank. |
 | "No password is saved for this server" | Edit the server and enter a password; **Test** reports the same failure. |
 | "No usable private key was found" | The settings row shows a *key file missing* badge; set the key path explicitly. |
 | Unexpected RPC errors | `$DSH_HOME/state/dsh-remote-ssh/host.log` records activation, saved servers and RPC failures. |
@@ -203,6 +207,6 @@ Nothing in `state.json` or in a conversation's selection needs to change.
 | `lib/secrets.js` | Credential records (legal `srv-<hex>` slot derivation), `~` expansion, private-key resolution. |
 | `lib/targets.js` | Catalog record → connection target (secrets, key file, jump chain). |
 | `lib/ssh.js` | `ssh2` transport: exec, upload, download, probe, jump host, timeouts, abort. |
-| `client.js` | Browser half: settings page, header button, popover. |
+| `client.js` | Browser half: settings page, the server button in both of its seats, popover. |
 | `scripts/repair-credentials.mjs` | Migrates 0.1.0 credential records after the DSH upgrade. |
 | `test/ssh.test.mjs` | Transport tests against a real host (`node test/ssh.test.mjs`). |

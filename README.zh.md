@@ -7,7 +7,7 @@
 | 位置 | 在哪 | 做什么 |
 |---|---|---|
 | 设置页 | 设置 → **远程 SSH** | 增删改查 SSH 服务器：名称、地址、端口、用户名、密码**或**私钥、可选跳板机、以及一句给 AI 的备注；还可以一键「测试连接」。 |
-| 标题栏按钮 | 每个对话右上角 | 点开一个小菜单，勾选**本对话**可以访问哪些服务器，按钮上显示已开放的数量。 |
+| 服务器按钮 | 对话标题栏右上角；还没发第一条消息时，出现在「新会话」那一行的最右侧 | 点开一个小菜单，勾选**本对话**可以访问哪些服务器，按钮上显示已开放的数量。 |
 | `ssh_servers` | 模型工具 | 列出本对话可用的服务器；加 `probe: true` 会逐台真实连接，报告延迟与 `uname`。 |
 | `ssh_exec` | 模型工具 | 在指定服务器上执行一条 shell 命令，返回退出码、stdout、stderr。 |
 | `ssh_transfer` | 模型工具 | 通过 SFTP 在本地与远端之间上传或下载单个文件。 |
@@ -32,6 +32,7 @@ plugin_manager install_bundle github:lone-wolf-akela/dsh-remote-ssh
    - **跳板机**：从清单里选另一台服务器作为跳板，最多一跳。
    - **测试连接**：真实发起一次连接并报告耗时。
 2. **打开一个对话**，点右上角的按钮，勾选这个对话允许 AI 使用的服务器。每个对话的勾选互相独立。
+   刚建出来、还没发第一条消息的对话没有标题栏，同一个按钮就停在「新会话」那一行——工作区和模式选择右边；发出第一条消息后它会回到标题栏。
 3. 直接让 AI 干活，例如「看看路由器磁盘占用」「把这个文件拷到路由器的 /tmp 下」。
 
 ## 安全模型
@@ -89,7 +90,7 @@ allowBuilds:
 | 现象 | 检查 |
 |---|---|
 | 升级后 Harness 起不来：`startup failed: 1 required plugin did not activate`、`Failed plugins: credentials`、`credential key segment "…" must match /^[a-z][a-z0-9-]*$/` | 磁盘上还留着 0.1.0 写的记录。**退出 DSH**，先 `node scripts/repair-credentials.mjs` 看报告，再 `--write` 执行；它会把旧记录改成新的 `remote-ssh/srv-<hex>` 形式、保留密码、并先备份文件。详见下面「升级」。 |
-| 看不到标题栏按钮 | 插件条目需要处于启用状态，见「插件 → 已安装」。 |
+| 看不到服务器按钮 | 插件条目需要处于启用状态，见「插件 → 已安装」。若这个对话还没发过消息，按钮在「新会话」那一行而不在标题栏——对话还是空白时，Harness 会把标题栏整行隐藏掉。 |
 | 提示「这台服务器还没有保存密码」 | 编辑该服务器补充密码；「测试连接」会报同样的错。 |
 | 提示「没有找到可用的私钥」 | 该行会显示「私钥缺失」标记，请显式填写私钥路径。 |
 | 其他 RPC 报错 | `$DSH_HOME/state/dsh-remote-ssh/host.log` 记录了激活、保存和 RPC 失败。 |
@@ -124,6 +125,6 @@ node scripts/repair-credentials.mjs --write   # 先备份 .credentials.yaml，�
 | `lib/secrets.js` | 凭据记录（合法的 `srv-<hex>` 槽位推导）、`~` 展开、私钥解析。 |
 | `lib/targets.js` | 清单记录 → 连接目标（凭据、私钥、跳板链）。 |
 | `lib/ssh.js` | `ssh2` 传输层：exec、上传、下载、探测、跳板、超时、取消。 |
-| `client.js` | 浏览器半边：设置页、标题栏按钮、弹出菜单。 |
+| `client.js` | 浏览器半边：设置页、服务器按钮（两个位置）、弹出菜单。 |
 | `scripts/repair-credentials.mjs` | DSH 升级后迁移 0.1.0 写下的凭据记录。 |
 | `test/ssh.test.mjs` | 针对真实主机的传输层测试（`node test/ssh.test.mjs`）。 |
