@@ -2,23 +2,33 @@
 
 A DeepSeek Harness bundle that gives the agent SSH: a catalog of servers you
 maintain in Settings, a per-conversation switch for which of them that
-conversation may use, and three model tools that appear only while something is
-switched on.
+conversation may use — and on which of those it may run commands as root through
+sudo — plus three model tools that appear only while something is switched on.
+
+Agents a conversation delegates to inherit its switches, so a teammate created
+with `subagent` can use exactly the servers its parent was given.
 
 ## What you get
 
 | Surface | Where | What it does |
 |---|---|---|
-| Settings page | Settings → **Remote SSH** | Add, edit, test and remove SSH servers: name, address, port, user, password **or** private key, optional jump host, and a note for the agent. |
-| Server button | Top right of a conversation's header — and, before its first message, at the right end of the New Session row | Opens a small menu of checkboxes that chooses which servers **this conversation** may use. The button shows how many are open. |
-| `ssh_servers` | model tool | Lists the servers shared with the conversation; `probe: true` also connects to each and reports latency and `uname`. |
-| `ssh_exec` | model tool | Runs a shell command on a shared server and returns exit code, stdout and stderr. |
+| Settings page | Settings → **Remote SSH** | Add, edit, test and remove SSH servers: name, address, port, user, password **or** private key, optional jump host, an optional **sudo password**, and a note for the agent. |
+| Server button | Top right of a conversation's header — and, before its first message, at the right end of the New Session row | Opens a small menu of checkboxes that chooses which servers **this conversation** may use. Each open row also carries a **sudo** pill. The button shows how many are open. |
+| `ssh_servers` | model tool | Lists the servers shared with the conversation, sudo included; `probe: true` also connects to each and reports latency and `uname`. |
+| `ssh_exec` | model tool | Runs a shell command on a shared server and returns exit code, stdout and stderr. `sudo: true` runs it as root on a server where sudo was enabled. |
 | `ssh_transfer` | model tool | Copies one file up or down over SFTP. |
 
 The three tools are **invisible to the model until the conversation has at least
 one server open**, and they disappear again when you close the last one — the
 tool list is re-resolved on every model step, so a change takes effect on the
 very next step of a long conversation in both directions.
+
+**Delegation inherits the switches.** A subagent — a teammate from
+`subagent`, a `workflow` agent, an Agent Team member — has no button of its
+own, so when a session has no selection of its own the nearest ancestor that has
+one answers for it. Opening a teammate's session in the UI shows the inherited
+list; changing anything there gives that session its own list, which then
+shadows the inherited one.
 
 ## Install
 
@@ -48,6 +58,10 @@ upgrades records written by 0.1.0.
      to override. An optional passphrase is stored like the password.
    - *Jump host*: pick another catalog entry to reach this server through it.
      One hop is supported.
+   - *Sudo password* (optional): the password this host's `sudo` asks for. It is
+     stored like the login password and is never sent to the model. Leave it
+     empty on hosts whose sudo needs no password — passwordless sudo works
+     without it.
    - **Test** runs a real connection and reports the round-trip time.
 2. **Open a conversation** and press the button at the top right. Check the
    servers the agent may use there. Each conversation keeps its own selection.
@@ -55,6 +69,9 @@ upgrades records written by 0.1.0.
    at all, so the same button waits in its New Session row, right after the
    workspace and agent-preset controls; it moves up into the header with the
    first message.
+   For each server you opened, the **sudo** pill next to it decides whether the
+   agent may run commands as root there. Off by default; turning it on is a
+   per-conversation, per-server decision.
 3. Ask the agent to do something on the machine, for example "check the disk
    usage on the router" or "copy this file to /tmp on the router".
 
@@ -76,8 +93,42 @@ upgrades records written by 0.1.0.
   the Host over a `/remote-ssh` route admitted by the Connection service, so it
   carries the same browser credential as the rest of the UI — the plugin adds no
   unauthenticated local endpoint.
-- **Every command runs as the configured user.** There is no privilege
-  escalation, no shell wrapper, and no rewriting of what you ask for.
+- **The grant is inherited, not copied.** A subagent with no selection of its own
+  resolves through its creating session, and only a live session in the chain can
+  answer — the walk stops at the first ancestor that has a selection, or at the
+  top of the chain.
+- **Privilege is a second permission inside the grant.** A command runs as the
+  configured user unless the model explicitly asks for `sudo` *and* the
+  conversation has sudo enabled for that particular server. Both the model's
+  choice and the stored grant are re-checked when the call runs, so an
+  out-of-date tool schema cannot elevate anything.
+- **The model never sees the sudo password.** It is not part of the tool schema,
+  never appears in an argument, and is not echoed in a result. See
+  [How sudo runs](#how-sudo-runs).
+
+### How sudo runs
+
+When an `ssh_exec` call asks for sudo, the transport does this inside the one
+SSH session, and the password exists only on that channel's stdin:
+
+1. **First attempt: `sudo -n` with stdin on `/dev/null`.** On a host with a
+   NOPASSWD rule, or one where sudo's timestamp is still cached, the command
+   simply runs. Because sudo was told never to prompt, the saved password cannot
+   end up in the command's own input.
+2. **Only when sudo refuses *for want of a password*, a second attempt uses
+   `sudo -S`**, writes the saved password plus a newline to stdin, and closes the
+   write side straight after. The command itself then sees end-of-file, not the
+   password.
+3. **Any other refusal is final** — no `sudo` binary, no permission for that
+   command, `requiretty` — and its stderr goes back to the model as the command's
+   failure. sudo either authenticates and execs, or refuses, so a command never
+   runs twice.
+
+The command is wrapped as `sudo ... -- /bin/sh -c '<your command>'` so that pipes
+and redirections inside it also run as root. The wrapper is therefore what sudo
+authorizes: a host whose sudoers grants specific *binaries* (rather than `ALL`)
+will not match, while `ALL=(ALL:ALL) ALL` — the usual case — works. A wrong sudo
+password is reported as such, without ever printing the password.
 
 ### Known limits
 
@@ -89,6 +140,9 @@ upgrades records written by 0.1.0.
   sees at most 12 000 characters per stream with an explicit truncation marker.
 - **No SFTP for `~`.** Relative remote paths resolve against the remote user's
   home directory; `~/x` is normalized to `x`.
+- **Sudo is a shell wrapper.** Only `ssh_exec` can elevate; SFTP transfers always
+  run as the login user. Hosts that refuse a tty-less sudo (`requiretty`) or
+  grant only named binaries in `sudoers` cannot be elevated this way.
 - **`ssh2` serves the connection.** Servers with strict `Match`/`ForceCommand`
   policies or unusual authentication (hardware tokens, keyboard-interactive
   challenge chains) may not work.
@@ -192,6 +246,11 @@ node scripts/repair-credentials.mjs           # report only: what would be re-ke
 node scripts/repair-credentials.mjs --write   # back up .credentials.yaml, then migrate
 ```
 
+Version 0.3.0 adds the sudo password and the per-server sudo flag. There is
+nothing to migrate: a version 1 `state.json` loads unchanged and is rewritten as
+version 2 on the next save, and the credential record simply gains an optional
+`sudoPassword` field beside `password`/`passphrase`.
+
 The script maps each old record onto the id the plugin now derives from its own
 `state.json` (`sha256(serverId)` → `srv-<16 hex>`), preserves the payload verbatim,
 reports records whose server no longer exists instead of guessing, and prints the
@@ -210,3 +269,4 @@ Nothing in `state.json` or in a conversation's selection needs to change.
 | `client.js` | Browser half: settings page, the server button in both of its seats, popover. |
 | `scripts/repair-credentials.mjs` | Migrates 0.1.0 credential records after the DSH upgrade. |
 | `test/ssh.test.mjs` | Transport tests against a real host (`node test/ssh.test.mjs`). |
+| `test/unit.test.mjs` | Offline tests: the grant document, delegation inheritance, the sudo command line, sudo over an in-process `ssh2` server, and a render of both browser surfaces (`node test/unit.test.mjs`). |

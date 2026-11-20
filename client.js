@@ -62,6 +62,13 @@ window.__ModuleLoader__.load({
         'settings.passwordNew': 'Password for this host',
         'settings.passphrase': 'Key passphrase',
         'settings.passphraseKeep': 'Saved — leave empty to keep it',
+        'settings.sudo': 'Sudo password',
+        'settings.sudoKeep': 'Saved — leave empty to keep it',
+        'settings.sudoNew': 'Password for sudo on this host (optional)',
+        'settings.sudoHint': 'Only used when a conversation is granted sudo access on this server. The agent never sees it.',
+        'settings.sudoClear': 'Remove saved sudo password',
+        'settings.sudoWillClear': 'Removed when you save',
+        'settings.sudoKeepIt': 'Keep the saved sudo password',
         'settings.keyPath': 'Private key file',
         'settings.keyPlaceholder': 'Leave empty for the usual ~/.ssh identity',
         'settings.keyAuto': 'Automatic: {path}',
@@ -77,6 +84,7 @@ window.__ModuleLoader__.load({
         'settings.badgeJump': 'via {name}',
         'settings.badgePassword': 'password',
         'settings.badgeKey': 'key',
+        'settings.badgeSudo': 'sudo',
         'settings.loadError': 'Could not load servers: {message}',
         'menu.title': 'Servers for this conversation',
         'menu.empty': 'No servers are configured yet. Add one in Settings → Remote SSH.',
@@ -85,6 +93,12 @@ window.__ModuleLoader__.load({
         'menu.loading': 'Loading…',
         'menu.open': 'SSH servers for this conversation',
         'menu.chip': 'SSH',
+        'menu.sudo': 'sudo',
+        'menu.sudoOn': 'Sudo on — the agent may run commands as root here',
+        'menu.sudoOff': 'Sudo off — commands run as the configured user',
+        'menu.sudoNoPassword': 'No sudo password saved: only hosts whose sudo needs no password will work.',
+        'menu.sudoCount': 'sudo on {count} of them',
+        'menu.inherited': 'Inherited from the conversation this one was delegated from. Changing anything here sets this conversation\'s own list.',
         'error.bad-request': 'Some fields are missing or invalid.',
         'error.no-servers': 'No SSH server is shared with this conversation.',
         'error.unknown-server': 'That server no longer exists.',
@@ -95,6 +109,9 @@ window.__ModuleLoader__.load({
         'error.no-password': 'No password is saved for this server.',
         'error.key-missing': 'No usable private key was found for this server.',
         'error.key-unreadable': 'The private key could not be read.',
+        'error.sudo-not-allowed': 'Sudo was not enabled for that server in this conversation.',
+        'error.sudo-password-missing': 'That server needs a sudo password, and none is saved.',
+        'error.sudo-password-invalid': 'A sudo password must be a single line.',
         'error.unknown-endpoint': 'This Harness version does not support that request.',
         'error.offline': 'Not connected to the Harness host.',
       },
@@ -126,6 +143,13 @@ window.__ModuleLoader__.load({
         'settings.passwordNew': '这台机器的密码',
         'settings.passphrase': '私钥口令',
         'settings.passphraseKeep': '已保存，留空则不修改',
+        'settings.sudo': 'Sudo 密码',
+        'settings.sudoKeep': '已保存，留空则不修改',
+        'settings.sudoNew': '这台机器 sudo 的密码（可选）',
+        'settings.sudoHint': '只在本对话为这台服务器开启 sudo 时使用，AI 看不到密码内容。',
+        'settings.sudoClear': '清除已保存的 sudo 密码',
+        'settings.sudoWillClear': '保存后清除',
+        'settings.sudoKeepIt': '保留已保存的 sudo 密码',
         'settings.keyPath': '私钥文件',
         'settings.keyPlaceholder': '留空则自动使用 ~/.ssh 下的默认私钥',
         'settings.keyAuto': '自动使用：{path}',
@@ -141,6 +165,7 @@ window.__ModuleLoader__.load({
         'settings.badgeJump': '经 {name}',
         'settings.badgePassword': '密码',
         'settings.badgeKey': '密钥',
+        'settings.badgeSudo': 'sudo',
         'settings.loadError': '无法读取服务器列表：{message}',
         'menu.title': '本对话可用的服务器',
         'menu.empty': '还没有配置服务器。先到「设置 → 远程 SSH」添加。',
@@ -149,6 +174,12 @@ window.__ModuleLoader__.load({
         'menu.loading': '加载中…',
         'menu.open': '本对话的 SSH 服务器',
         'menu.chip': 'SSH',
+        'menu.sudo': 'sudo',
+        'menu.sudoOn': '已开启 sudo，AI 可以 root 身份执行命令',
+        'menu.sudoOff': '未开启 sudo，命令以配置的用户身份执行',
+        'menu.sudoNoPassword': '没有保存 sudo 密码：只有免密码 sudo 的主机可用。',
+        'menu.sudoCount': '其中 {count} 台开启了 sudo',
+        'menu.inherited': '这些服务器继承自委派它的对话；在这里改动会给本对话单独设置一份列表。',
         'error.bad-request': '有必填项缺失或填写有误。',
         'error.no-servers': '本对话没有可用服务器。',
         'error.unknown-server': '这台服务器已不存在。',
@@ -159,6 +190,9 @@ window.__ModuleLoader__.load({
         'error.no-password': '这台服务器还没有保存密码。',
         'error.key-missing': '没有找到可用的私钥。',
         'error.key-unreadable': '私钥文件无法读取。',
+        'error.sudo-not-allowed': '本对话没有为这台服务器开启 sudo。',
+        'error.sudo-password-missing': '这台服务器需要 sudo 密码，但还没有保存。',
+        'error.sudo-password-invalid': 'sudo 密码只能是单行。',
         'error.unknown-endpoint': '当前 Harness 版本不支持该请求。',
         'error.offline': '未连接到 Harness 主进程。',
       },
@@ -228,6 +262,15 @@ window.__ModuleLoader__.load({
       '.rssh-opt-text{flex:1;min-width:0;display:flex;flex-direction:column}',
       '.rssh-opt-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.rssh-opt-sub{font-size:11px;line-height:15px;color:var(--rssh-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      /* one menu row: the checkbox halves and the sudo pill share it */
+      '.rssh-optrow{display:flex;align-items:center;gap:2px;border-radius:8px}',
+      '.rssh-optrow:hover{background:var(--dsw-alias-bg-layer-2)}',
+      '.rssh-optrow > .rssh-opt{flex:1;min-width:0;background:transparent}',
+      '.rssh-optrow > .rssh-opt:hover{background:transparent}',
+      '.rssh-sudo{flex:none;margin-right:4px;height:20px;padding:0 7px;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;background:transparent;color:var(--rssh-muted);font:inherit;font-size:10px;line-height:18px;letter-spacing:.02em;cursor:pointer;white-space:nowrap}',
+      '.rssh-sudo:hover:not(:disabled){background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}',
+      '.rssh-sudo[data-on="true"]{border-color:transparent;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-base)}',
+      '.rssh-sudo:disabled{opacity:.45;cursor:default}',
       '.rssh-pop-note{padding:6px 8px 2px;font-size:11px;line-height:16px;color:var(--rssh-muted)}',
       '.rssh-pop-empty{padding:4px 8px 10px;font-size:12px;line-height:18px;color:var(--rssh-muted)}',
     ].join('')
@@ -315,6 +358,26 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Read a grant list out of a host response.
+     *
+     * The host answers with `grants` (`[{ id, sudo }]`); `allowed` is the flat id
+     * list an older host sent, kept as a fallback so a page and a host updated at
+     * different moments still agree on which servers are open.
+     * @param value - the `bootstrap` or `session.set` value.
+     * @returns `{ id, sudo }` entries, sudo defaulting to off.
+     */
+    function grantsOfResponse(value) {
+      if (Array.isArray(value?.grants)) {
+        return value.grants
+          .filter((grant) => grant !== null && typeof grant === 'object' && typeof grant.id === 'string' && grant.id !== '')
+          .map((grant) => ({ id: grant.id, sudo: grant.sudo === true }))
+      }
+      return Array.isArray(value?.allowed)
+        ? value.allowed.filter((id) => typeof id === 'string').map((id) => ({ id, sudo: false }))
+        : []
+    }
+
+    /**
      * Render one host icon from the shared sprite.
      * @param props - `name` (sprite id) and `size`.
      * @returns the svg element.
@@ -392,7 +455,20 @@ window.__ModuleLoader__.load({
 
     /** Draft for a brand-new server. */
     function emptyDraft() {
-      return { id: '', name: '', host: '', port: '22', username: '', auth: 'password', keyPath: '', jumpId: '', note: '' }
+      return {
+        id: '',
+        name: '',
+        host: '',
+        port: '22',
+        username: '',
+        auth: 'password',
+        keyPath: '',
+        jumpId: '',
+        note: '',
+        // Set when the user asks to drop the stored sudo password; the save
+        // request then carries `clearSudoPassword` instead of a new value.
+        clearSudo: false,
+      }
     }
 
     /**
@@ -412,6 +488,7 @@ window.__ModuleLoader__.load({
         keyPath: view.keyPath,
         jumpId: view.jumpId,
         note: view.note,
+        clearSudo: false,
       }
     }
 
@@ -522,6 +599,9 @@ window.__ModuleLoader__.load({
             view.auth === 'key' && view.keyExists !== true
               ? h('span', { className: 'rssh-badge', 'data-tone': 'error' }, translate(t, 'settings.keyBroken'))
               : null,
+            view.hasSudoPassword === true
+              ? h('span', { className: 'rssh-badge' }, translate(t, 'settings.badgeSudo'))
+              : null,
           ),
           h('div', { className: 'rssh-row-sub' }, subtitle),
           resultLine,
@@ -536,7 +616,22 @@ window.__ModuleLoader__.load({
      * @returns the form.
      */
     function ServerForm(props) {
-      const { draft, setDraft, password, setPassword, passphrase, setPassphrase, servers, t, error, saving, onSubmit, onCancel } = props
+      const {
+        draft,
+        setDraft,
+        password,
+        setPassword,
+        passphrase,
+        setPassphrase,
+        sudoPassword,
+        setSudoPassword,
+        servers,
+        t,
+        error,
+        saving,
+        onSubmit,
+        onCancel,
+      } = props
       const editing = draft.id !== ''
       const editingView = editing ? servers.find((view) => view.id === draft.id) : undefined
       const usesKey = draft.auth === 'key'
@@ -690,6 +785,54 @@ window.__ModuleLoader__.load({
         )
       }
 
+      // The sudo password is independent of the login method — a key-based
+      // server can still need a password for sudo — so it is always offered,
+      // with its own hint and its own "remove" affordance.
+      const sudoSaved = editingView?.hasSudoPassword === true
+      const sudoWillClear = draft.clearSudo === true
+      secretFields.push(
+        field(
+          'sudoPassword',
+          translate(t, 'settings.sudo'),
+          h(
+            'div',
+            { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+            h('input', {
+              className: 'rssh-input',
+              type: 'password',
+              value: sudoPassword,
+              autoComplete: 'new-password',
+              disabled: sudoWillClear,
+              placeholder:
+                sudoWillClear
+                  ? translate(t, 'settings.sudoWillClear')
+                  : sudoSaved
+                    ? translate(t, 'settings.sudoKeep')
+                    : translate(t, 'settings.sudoNew'),
+              onChange: (event) => setSudoPassword(event.target.value),
+            }),
+            h('div', { className: 'rssh-hint' }, translate(t, 'settings.sudoHint')),
+            sudoSaved
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'rssh-btn',
+                    'data-variant': 'quiet',
+                    style: { alignSelf: 'flex-start', height: '26px', padding: '0 8px', fontSize: '12px' },
+                    onClick: () => {
+                      setSudoPassword('')
+                      setDraft({ ...draft, clearSudo: !sudoWillClear })
+                    },
+                  },
+                  translate(t, sudoWillClear ? 'settings.sudoKeepIt' : 'settings.sudoClear'),
+                )
+              : null,
+          ),
+          2,
+        ),
+      )
+
       children.push(h('div', { key: 'secret', className: 'rssh-fields' }, secretFields))
       children.push(
         h(
@@ -769,6 +912,7 @@ window.__ModuleLoader__.load({
       const [draft, setDraft] = useState(null)
       const [password, setPassword] = useState('')
       const [passphrase, setPassphrase] = useState('')
+      const [sudoPassword, setSudoPassword] = useState('')
       const [formError, setFormError] = useState(null)
       const [saving, setSaving] = useState(false)
       const [busyId, setBusyId] = useState(null)
@@ -795,6 +939,7 @@ window.__ModuleLoader__.load({
         setDraft(null)
         setPassword('')
         setPassphrase('')
+        setSudoPassword('')
         setFormError(null)
       }, [])
 
@@ -818,6 +963,8 @@ window.__ModuleLoader__.load({
             },
             ...(password === '' ? {} : { password }),
             ...(passphrase === '' ? {} : { passphrase }),
+            ...(sudoPassword === '' ? {} : { sudoPassword }),
+            ...(draft.clearSudo === true ? { clearSudoPassword: true } : {}),
           })
           setServers(Array.isArray(value?.servers) ? value.servers : [])
           closeForm()
@@ -826,7 +973,7 @@ window.__ModuleLoader__.load({
         } finally {
           setSaving(false)
         }
-      }, [draft, saving, rpc, password, passphrase, closeForm])
+      }, [draft, saving, rpc, password, passphrase, sudoPassword, closeForm])
 
       const remove = useCallback(
         async (view) => {
@@ -874,6 +1021,7 @@ window.__ModuleLoader__.load({
         setDraft(emptyDraft())
         setPassword('')
         setPassphrase('')
+        setSudoPassword('')
         setFormError(null)
       }, [])
 
@@ -881,6 +1029,7 @@ window.__ModuleLoader__.load({
         setDraft(draftOf(view))
         setPassword('')
         setPassphrase('')
+        setSudoPassword('')
         setFormError(null)
       }, [])
 
@@ -904,6 +1053,8 @@ window.__ModuleLoader__.load({
             setPassword,
             passphrase,
             setPassphrase,
+            sudoPassword,
+            setSudoPassword,
             servers,
             t,
             error: formError,
@@ -1030,7 +1181,9 @@ window.__ModuleLoader__.load({
       const { menuStore, rpc } = props
       const menu = useStoreValue(menuStore)
       const [servers, setServers] = useState([])
-      const [allowed, setAllowed] = useState([])
+      // One entry per open server — `{ id, sudo }` — mirroring the host grant.
+      const [grants, setGrants] = useState([])
+      const [inherited, setInherited] = useState(false)
       const [loading, setLoading] = useState(false)
       const [error, setError] = useState(null)
       const [pending, setPending] = useState(false)
@@ -1048,7 +1201,8 @@ window.__ModuleLoader__.load({
           .then((value) => {
             if (requestRef.current !== token) return
             setServers(Array.isArray(value?.servers) ? value.servers : [])
-            setAllowed(Array.isArray(value?.allowed) ? value.allowed : [])
+            setGrants(grantsOfResponse(value))
+            setInherited(value?.inherited === true)
           })
           .catch((failure) => {
             if (requestRef.current === token) setError(describeFailure(tRef.current, failure))
@@ -1068,27 +1222,60 @@ window.__ModuleLoader__.load({
         return () => document.removeEventListener('keydown', onKey)
       }, [menu.open, menuStore])
 
-      const toggle = useCallback(
-        async (view) => {
+      /**
+       * Send one new grant list and adopt the host's answer.
+       *
+       * Both switches go through here so a failed write rolls the whole list
+       * back: the popover never shows a state the host did not accept.
+       * @param next - the optimistic grant list.
+       */
+      const commit = useCallback(
+        async (next) => {
           if (pending || typeof sessionId !== 'string' || sessionId === '') return
-          const previous = allowed
-          const next = allowed.includes(view.id) ? allowed.filter((id) => id !== view.id) : [...allowed, view.id]
-          setAllowed(next)
+          const previous = grants
+          setGrants(next)
           setPending(true)
           try {
-            const value = await rpc.call('session.set', { sessionId, allowed: next })
-            setAllowed(Array.isArray(value?.allowed) ? value.allowed : next)
+            // `allowed` is the flat list an older host reads; `grants` carries the
+            // sudo flags. Sending both keeps a page that loaded new code from
+            // rewriting permissions against a host that is still the old build.
+            const value = await rpc.call('session.set', { sessionId, grants: next, allowed: next.map((grant) => grant.id) })
+            setGrants(grantsOfResponse(value))
+            setInherited(value?.inherited === true)
             setError(null)
           } catch (failure) {
-            setAllowed(previous)
+            setGrants(previous)
             setError(describeFailure(tRef.current, failure))
           } finally {
             setPending(false)
             menuStore.grantsChanged()
           }
         },
-        [allowed, pending, rpc, sessionId, menuStore],
+        [grants, pending, rpc, sessionId, menuStore],
       )
+
+      const toggle = useCallback(
+        (view) => {
+          const open = grants.some((grant) => grant.id === view.id)
+          // Turning sudo on is an explicit choice per server, so closing a
+          // server forgets it; the password itself stays saved for next time.
+          const next = open
+            ? grants.filter((grant) => grant.id !== view.id)
+            : [...grants, { id: view.id, sudo: false }]
+          commit(next)
+        },
+        [grants, commit],
+      )
+
+      const toggleSudo = useCallback(
+        (view) => {
+          commit(grants.map((grant) => (grant.id === view.id ? { ...grant, sudo: grant.sudo !== true } : grant)))
+        },
+        [grants, commit],
+      )
+
+      const isOpen = (id) => grants.some((grant) => grant.id === id)
+      const sudoOf = (id) => grants.some((grant) => grant.id === id && grant.sudo === true)
 
       if (menu.open !== true) return null
       const anchor = menu.anchor ?? { top: 0, right: 0, bottom: 0 }
@@ -1099,30 +1286,52 @@ window.__ModuleLoader__.load({
       const left = Math.max(margin, Math.min(anchor.right - width, viewportWidth - width - margin))
       const top = Math.min(anchor.bottom + 6, Math.max(margin, viewportHeight - 160))
 
-      const rows = servers.map((view) =>
-        h(
-          'button',
-          {
-            key: view.id,
-            type: 'button',
-            className: 'rssh-opt',
-            role: 'menuitemcheckbox',
-            'aria-checked': String(allowed.includes(view.id)),
-            onClick: () => toggle(view),
-          },
+      const rows = servers.map((view) => {
+        const open = isOpen(view.id)
+        const sudo = sudoOf(view.id)
+        return h(
+          'div',
+          { key: view.id, className: 'rssh-optrow' },
           h(
-            'span',
-            { className: 'rssh-opt-box' },
-            allowed.includes(view.id) ? h(Icon, { name: 'dsw-icon-check-outline-regular', size: 12 }) : null,
+            'button',
+            {
+              type: 'button',
+              className: 'rssh-opt',
+              role: 'menuitemcheckbox',
+              'aria-checked': String(open),
+              onClick: () => toggle(view),
+            },
+            h(
+              'span',
+              { className: 'rssh-opt-box' },
+              open ? h(Icon, { name: 'dsw-icon-check-outline-regular', size: 12 }) : null,
+            ),
+            h(
+              'span',
+              { className: 'rssh-opt-text' },
+              h('span', { className: 'rssh-opt-name' }, view.name),
+              h('span', { className: 'rssh-opt-sub' }, `${view.username}@${view.host}:${view.port}`),
+            ),
           ),
-          h(
-            'span',
-            { className: 'rssh-opt-text' },
-            h('span', { className: 'rssh-opt-name' }, view.name),
-            h('span', { className: 'rssh-opt-sub' }, `${view.username}@${view.host}:${view.port}`),
-          ),
-        ),
-      )
+          // Only an open server can be elevated: sudo is a permission inside
+          // the grant, never a way to reach a server that is closed.
+          open
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'rssh-sudo',
+                  'data-on': String(sudo),
+                  'aria-pressed': String(sudo),
+                  title: translate(t, sudo ? 'menu.sudoOn' : view.hasSudoPassword === true ? 'menu.sudoOff' : 'menu.sudoNoPassword'),
+                  disabled: pending,
+                  onClick: () => toggleSudo(view),
+                },
+                translate(t, 'menu.sudo'),
+              )
+            : null,
+        )
+      })
 
       return [
         h('div', {
@@ -1153,8 +1362,18 @@ window.__ModuleLoader__.load({
             : h(
                 'div',
                 { className: 'rssh-pop-note' },
-                allowed.length === 0 ? translate(t, 'menu.none') : translate(t, 'menu.count', { count: allowed.length }),
+                grants.length === 0 ? translate(t, 'menu.none') : translate(t, 'menu.count', { count: grants.length }),
               ),
+          grants.some((grant) => grant.sudo === true)
+            ? h(
+                'div',
+                { className: 'rssh-pop-note' },
+                translate(t, 'menu.sudoCount', { count: grants.filter((grant) => grant.sudo === true).length }),
+              )
+            : null,
+          inherited
+            ? h('div', { className: 'rssh-pop-note' }, translate(t, 'menu.inherited'))
+            : null,
         ),
       ]
     }

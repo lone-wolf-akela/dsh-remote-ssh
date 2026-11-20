@@ -2,7 +2,7 @@
   "name": "@local/dsh-remote-ssh",
   "version": "0.2.2",
   "private": true,
-  "description": "Remote SSH: keep a catalog of SSH servers in Settings, open the ones a conversation may use from its header, and let the agent run commands and move files over SSH, jump hosts included.",
+  "description": "Remote SSH: keep a catalog of SSH servers in Settings, choose per conversation which of them the agent may use — and where it may run commands as root through sudo — then let it run commands and move files over SSH, jump hosts included, with subagents inheriting the same access.",
   "type": "module",
   "license": "MIT",
   "author": "lone-wolf-akela",
@@ -44,6 +44,8 @@
   ],
   "scripts": {
     "repair-credentials": "node scripts/repair-credentials.mjs",
+    "test": "node test/unit.test.mjs",
+    "test:unit": "node test/unit.test.mjs",
     "test:ssh": "node test/ssh.test.mjs"
   },
   "dsh": {

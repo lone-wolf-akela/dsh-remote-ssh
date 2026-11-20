@@ -5,7 +5,8 @@
  *
  *   1. a durable catalog of SSH servers the user maintains in Settings,
  *   2. a per-conversation grant that says which of those servers the agent may
- *      touch in that conversation,
+ *      touch in that conversation, and on which of them it may also run
+ *      commands through sudo,
  *   3. three model tools — list, execute, transfer — that are visible only
  *      while the conversation still has at least one granted server,
  *   4. one authenticated RPC channel (`/remote-ssh`) the browser halves use to
@@ -14,6 +15,18 @@
  * The grant is the security boundary. Nothing here relies on the model asking
  * politely: a tool call re-checks the grant for its own session, and a session
  * without a grant sees no tools at all.
+ *
+ * A grant is inherited down the delegation chain. A subagent has no UI to pick
+ * servers, so when a session holds no grant of its own the nearest ancestor
+ * that has one answers for it — which is what makes a teammate created by an
+ * agent see exactly the servers that agent was given.
+ *
+ * Sudo is a second, narrower permission inside the same grant: the user stores
+ * a sudo password per server in Settings, and enables it per server for the
+ * conversation. Even then the model only chooses *whether* a given command runs
+ * elevated; the password itself is read from the credential store at execution
+ * time and written to the SSH channel's stdin, never into the command line, a
+ * tool argument, or a tool result.
  *
  * Persistence is split by sensitivity: addresses and usernames live in
  * `$DSH_HOME/state/dsh-remote-ssh/state.json` (`lib/state.js`), passwords and
@@ -24,7 +37,7 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 
 import { createStore, stateDirectory } from './lib/state.js'
-import { deleteSecret, expandHome, writeSecret } from './lib/secrets.js'
+import { deleteSecret, expandHome, readSecret, writeSecret } from './lib/secrets.js'
 import { buildTarget, describeAll, describeServer, ServerError } from './lib/targets.js'
 import { downloadFile, execCommand, probe, uploadFile } from './lib/ssh.js'
 
@@ -100,18 +113,56 @@ const TIMEOUT_PARAMETER = {
 }
 
 /**
+ * The session that created `sessionId`, when the Harness exposes session headers.
+ *
+ * A subagent's durable header carries its creator, so this is the delegation
+ * chain a grant is inherited along. The `sessions` service is a soft
+ * dependency: a composition without it simply never inherits, and a session id
+ * that is not live right now (which a resumed standalone child can be) reads as
+ * a chain end rather than an error.
+ * @param ctx - plugin context.
+ * @param sessionId - session to look up.
+ * @returns the creating session id, or undefined at the top of the chain.
+ */
+function parentSessionOf(ctx, sessionId) {
+  if (typeof sessionId !== 'string' || sessionId === '') return undefined
+  const sessions = ctx.get('sessions')
+  if (sessions === undefined || typeof sessions.get !== 'function') return undefined
+  try {
+    const parent = sessions.get(sessionId)?.header?.parentSession
+    return typeof parent === 'string' && parent !== '' ? parent : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Build the grant lookup the tools use: own grants first, then the nearest
+ * ancestor that has some, which is what a subagent inherits.
+ * @param ctx - plugin context.
+ * @param store - the state store.
+ * @returns a synchronous resolver from session id to effective grants.
+ */
+function createGrantLookup(ctx, store) {
+  return (sessionId) => store.effectiveGrants(sessionId, (parent) => parentSessionOf(ctx, parent))
+}
+
+/**
  * Register one tool so it exists only while its session has a granted server.
  *
  * The gate is evaluated per model step, which is what makes a mid-conversation
- * grant change take effect on the very next step in both directions.
+ * grant change take effect on the very next step in both directions — and the
+ * lookup walks the delegation chain, so a child agent sees the servers its
+ * parent was given.
  * @param ctx - plugin context.
+ * @param grantsOf - session id to effective grants.
  * @param definition - tool definition.
  */
-function registerGatedTool(ctx, store, definition) {
+function registerGatedTool(ctx, grantsOf, definition) {
   ctx.effect(
     () =>
       ctx.tools.register(definition, {
-        when: (activation) => store.hasAnyAllowed(activation?.agent?.id),
+        when: (activation) => grantsOf(activation?.agent?.id).length > 0,
       }),
     `remote-ssh: ${definition.name}`,
   )
@@ -120,13 +171,14 @@ function registerGatedTool(ctx, store, definition) {
 /**
  * Resolve the server one tool call may use, enforcing the conversation grant.
  * @param store - the state store.
+ * @param grantsOf - session id to effective grants.
  * @param sessionId - the calling session.
  * @param reference - server name or id from the call arguments.
- * @returns the granted server record.
+ * @returns the granted server record and its grant (which carries the sudo flag).
  * @throws ServerError when the reference is unknown, ungranted, or nothing is granted.
  */
-function requireGrantedServer(store, sessionId, reference) {
-  const granted = store.allowedFor(sessionId)
+function requireGrantedServer(store, grantsOf, sessionId, reference) {
+  const granted = grantsOf(sessionId)
   if (granted.length === 0) {
     throw new ServerError(
       'no-servers',
@@ -136,16 +188,17 @@ function requireGrantedServer(store, sessionId, reference) {
   const server = store.findServer(reference)
   const names = store
     .servers()
-    .filter((candidate) => granted.includes(candidate.id))
+    .filter((candidate) => granted.some((grant) => grant.id === candidate.id))
     .map((candidate) => candidate.name)
     .join(', ')
   if (server === undefined) {
     throw new ServerError('unknown-server', `no server matches "${reference}"; shared with this conversation: ${names}`)
   }
-  if (!granted.includes(server.id)) {
+  const grant = granted.find((candidate) => candidate.id === server.id)
+  if (grant === undefined) {
     throw new ServerError('not-allowed', `server "${server.name}" exists but is not shared with this conversation; shared: ${names}`)
   }
-  return server
+  return { server, grant }
 }
 
 /**
@@ -209,12 +262,13 @@ const TOOL_OUTPUT = {
  * @param ctx - plugin context.
  * @param store - the state store.
  * @param credentialsOf - accessor for the optional credential service.
+ * @param grantsOf - session id to effective grants, inheritance included.
  */
-function registerTools(ctx, store, credentialsOf) {
-  registerGatedTool(ctx, store, {
+function registerTools(ctx, store, credentialsOf, grantsOf) {
+  registerGatedTool(ctx, grantsOf, {
     name: 'ssh_servers',
     description:
-      'List the SSH servers shared with this conversation: name, address, user, how it authenticates, and its jump host. Set probe to also connect to each one and report whether it is reachable, with its latency and uname.',
+      'List the SSH servers shared with this conversation: name, address, user, how it authenticates, its jump host, and whether sudo is enabled there. Set probe to also connect to each one and report whether it is reachable, with its latency and uname.',
     parameters: {
       type: 'object',
       properties: {
@@ -233,17 +287,20 @@ function registerTools(ctx, store, credentialsOf) {
     async execute(args, exec) {
       const sessionId = exec?.agent?.id
       try {
-        const granted = store.allowedFor(sessionId)
+        const granted = grantsOf(sessionId)
         if (granted.length === 0) {
           throw new ServerError('no-servers', 'no SSH server is shared with this conversation')
         }
         const wanted = typeof args?.server === 'string' && args.server.trim() !== '' ? args.server.trim() : undefined
-        const selected = wanted === undefined ? store.servers().filter((server) => granted.includes(server.id)) : [requireGrantedServer(store, sessionId, wanted)]
+        const selected = wanted === undefined
+          ? store.servers().filter((server) => granted.some((grant) => grant.id === server.id))
+          : [requireGrantedServer(store, grantsOf, sessionId, wanted).server]
         const credentials = credentialsOf()
         const probes = args?.probe === true
         const rows = []
         for (const server of selected) {
           const view = await describeServer(store, credentials, server)
+          const grant = granted.find((candidate) => candidate.id === server.id)
           const row = {
             id: view.id,
             name: view.name,
@@ -251,6 +308,8 @@ function registerTools(ctx, store, credentialsOf) {
             auth: view.auth === 'password' ? 'password' : `key (${view.resolvedKeyPath || 'no key found'})`,
             jump: view.jumpName === '' ? null : view.jumpName,
             note: view.note === '' ? null : view.note,
+            sudo: grant?.sudo === true,
+            sudoPasswordSaved: view.hasSudoPassword === true,
           }
           if (probes) {
             try {
@@ -275,6 +334,8 @@ function registerTools(ctx, store, credentialsOf) {
           const parts = [`- ${row.name}: ${row.address}`, `auth: ${row.auth}`]
           if (row.jump !== null) parts.push(`via jump: ${row.jump}`)
           if (row.note !== null) parts.push(row.note)
+          parts.push(row.sudo ? 'sudo: enabled' : 'sudo: not enabled')
+          if (row.sudo && row.sudoPasswordSaved !== true) parts.push('(no sudo password saved, so only passwordless sudo will work)')
           if (row.reachable === true) parts.push(`reachable (${row.latencyMs} ms)${row.uname === null ? '' : ` — ${row.uname}`}`)
           else if (row.reachable === false) parts.push(`unreachable: ${row.error}`)
           lines.push(parts.join(' · '))
@@ -287,10 +348,10 @@ function registerTools(ctx, store, credentialsOf) {
     },
   })
 
-  registerGatedTool(ctx, store, {
+  registerGatedTool(ctx, grantsOf, {
     name: 'ssh_exec',
     description:
-      'Run a shell command on an SSH server shared with this conversation and return its exit code, stdout and stderr. The command runs through the remote shell, so pipes and redirects behave as they do there; use cwd rather than a leading cd.',
+      'Run a shell command on an SSH server shared with this conversation and return its exit code, stdout and stderr. The command runs through the remote shell, so pipes and redirects behave as they do there; use cwd rather than a leading cd. Set sudo to run it as root — only possible on servers the user enabled sudo for, and the sudo password, when one is needed, is supplied by the harness and never shown to you.',
     parameters: {
       type: 'object',
       properties: {
@@ -303,6 +364,11 @@ function registerTools(ctx, store, credentialsOf) {
           type: 'string',
           description: "Directory to run in. Defaults to the remote user's home directory.",
         },
+        sudo: {
+          type: 'boolean',
+          description:
+            'Run the command as root through sudo. Only accepted on servers listed with sudo enabled by ssh_servers; leave it out to run as the configured user.',
+        },
         timeoutMs: TIMEOUT_PARAMETER,
       },
       required: ['server', 'command'],
@@ -312,18 +378,42 @@ function registerTools(ctx, store, credentialsOf) {
     async execute(args, exec) {
       const sessionId = exec?.agent?.id
       try {
-        const server = requireGrantedServer(store, sessionId, args?.server)
+        const { server, grant } = requireGrantedServer(store, grantsOf, sessionId, args?.server)
         const command = typeof args?.command === 'string' ? args.command : ''
         if (command.trim() === '') throw new ServerError('bad-request', 'command must not be empty')
+        const wantsSudo = args?.sudo === true
+        let sudoOptions
+        if (wantsSudo) {
+          if (grant.sudo !== true) {
+            throw new ServerError(
+              'sudo-not-allowed',
+              `sudo is not enabled for "${server.name}" in this conversation; the user turns it on with the sudo switch next to that server in the server menu`,
+            )
+          }
+          // Read the saved password here and hand it straight to the transport.
+          // It is deliberately not copied into the tool result, the summary, or
+          // any error: the model only ever learns whether sudo was used.
+          const secret = await readSecret(credentialsOf(), server.id)
+          sudoOptions = { password: secret.sudoPassword }
+        }
         const target = await buildTarget(store, credentialsOf(), server)
         const result = await execCommand(target, command, {
           timeoutMs: normalizeTimeout(args?.timeoutMs),
           ...(typeof args?.cwd === 'string' && args.cwd.trim() !== '' ? { cwd: args.cwd.trim() } : {}),
+          ...(wantsSudo ? { sudo: sudoOptions } : {}),
         })
+        const elevated = result.elevated === true
+        const sudoAuthFailed = elevated
+          && typeof result.exitCode === 'number'
+          && result.exitCode !== 0
+          && /incorrect password|Sorry, try again|askpass|a password is required/i.test(result.stderr ?? '')
         const header = result.ok === true
-          ? `${serverLabel(server)} · exit ${result.exitCode} · ${result.durationMs} ms`
+          ? `${serverLabel(server)} · exit ${result.exitCode}${elevated ? ' · sudo' : ''} · ${result.durationMs} ms`
           : `${server.name} · ${result.error?.stage ?? 'failed'}: ${result.error?.message ?? 'the command did not run'}`
         const lines = [header]
+        if (sudoAuthFailed) {
+          lines.push('', 'sudo rejected the saved sudo password for this server. Ask the user to check it in Settings → Remote SSH; do not guess passwords.')
+        }
         if ((result.stdout ?? '') !== '') lines.push('', clip(result.stdout))
         if ((result.stderr ?? '') !== '') lines.push('', 'stderr:', clip(result.stderr))
         if (result.truncated === true) lines.push('', '(output was truncated by the output limit)')
@@ -331,12 +421,17 @@ function registerTools(ctx, store, credentialsOf) {
           ok: result.ok === true,
           summary: lines.join('\n'),
           server: server.name,
+          sudo: elevated,
           exitCode: result.exitCode ?? null,
           stdout: clip(result.stdout ?? ''),
           stderr: clip(result.stderr ?? ''),
           truncated: result.truncated === true,
           durationMs: result.durationMs ?? null,
-          ...(result.ok === true ? {} : { error: result.error }),
+          ...(result.ok === true
+            ? (sudoAuthFailed
+              ? { error: { code: 'sudo-auth-failed', stage: 'sudo', message: 'sudo rejected the saved sudo password for this server' } }
+              : {})
+            : { error: result.error }),
         }
       } catch (error) {
         const result = failure(error)
@@ -345,7 +440,7 @@ function registerTools(ctx, store, credentialsOf) {
     },
   })
 
-  registerGatedTool(ctx, store, {
+  registerGatedTool(ctx, grantsOf, {
     name: 'ssh_transfer',
     description:
       'Copy one file between this machine and an SSH server shared with this conversation, in either direction. Missing parent directories are created on both ends.',
@@ -376,7 +471,7 @@ function registerTools(ctx, store, credentialsOf) {
     async execute(args, exec) {
       const sessionId = exec?.agent?.id
       try {
-        const server = requireGrantedServer(store, sessionId, args?.server)
+        const { server } = requireGrantedServer(store, grantsOf, sessionId, args?.server)
         const direction = args?.direction
         if (direction !== 'upload' && direction !== 'download') {
           throw new ServerError('bad-request', "direction must be 'upload' or 'download'")
@@ -419,14 +514,20 @@ function registerTools(ctx, store, credentialsOf) {
  * @returns the endpoint value.
  */
 async function handleRpc(deps, endpoint, payload) {
-  const { store, credentialsOf } = deps
+  const { store, credentialsOf, grantsOf } = deps
   const body = payload !== null && typeof payload === 'object' ? payload : {}
 
   if (endpoint === 'bootstrap') {
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
+    // The menu shows what actually answers for this session, so an inherited
+    // grant appears checked here; toggling it then writes the session's own
+    // record, which from that moment shadows the inherited one.
+    const grants = grantsOf(sessionId)
     return {
       servers: await describeAll(store, credentialsOf()),
-      allowed: store.allowedFor(sessionId),
+      grants,
+      allowed: grants.map((grant) => grant.id),
+      inherited: sessionId !== '' && store.grantsFor(sessionId).length === 0 && grants.length > 0,
       sessionId,
     }
   }
@@ -459,14 +560,22 @@ async function handleRpc(deps, endpoint, payload) {
     }
     const saved = store.upsertServer(candidate)
     const credentials = credentialsOf()
+    const secretInput = {
+      ...(typeof body.password === 'string' ? { password: body.password } : {}),
+      ...(typeof body.passphrase === 'string' ? { passphrase: body.passphrase } : {}),
+      ...(typeof body.sudoPassword === 'string' ? { sudoPassword: body.sudoPassword } : {}),
+    }
+    if (typeof body.sudoPassword === 'string' && /[\r\n]/.test(body.sudoPassword)) {
+      throw new ServerError('sudo-password-invalid', 'a sudo password must be a single line')
+    }
     if (body.clearSecret === true) {
       await deleteSecret(credentials, saved.id)
-    } else if (typeof body.password === 'string' || typeof body.passphrase === 'string') {
-      await writeSecret(credentials, saved.id, {
-        ...(typeof body.password === 'string' ? { password: body.password } : {}),
-        ...(typeof body.passphrase === 'string' ? { passphrase: body.passphrase } : {}),
-      })
+    } else if (Object.keys(secretInput).length > 0) {
+      await writeSecret(credentials, saved.id, secretInput)
     }
+    // Clearing the sudo password keeps the login credential: the two live in
+    // the same record but are independent permissions.
+    if (body.clearSudoPassword === true) await writeSecret(credentials, saved.id, { sudoPassword: '' })
     logDebug(`saved server ${saved.id} (${saved.auth})`)
     return { servers: await describeAll(store, credentials), savedId: saved.id }
   }
@@ -497,9 +606,12 @@ async function handleRpc(deps, endpoint, payload) {
   if (endpoint === 'session.set') {
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
     if (sessionId === '') throw new ServerError('bad-request', 'a session id is required')
-    const allowed = store.setAllowed(sessionId, body.allowed)
-    logDebug(`session ${sessionId} granted ${allowed.length} server(s)`)
-    return { allowed, sessionId }
+    // `grants` is the current shape (`[{ id, sudo }]`); `allowed` is accepted so a
+    // page loaded from an older bundle keeps working.
+    const input = Array.isArray(body.grants) ? body.grants : body.allowed
+    const grants = store.setGrants(sessionId, input)
+    logDebug(`session ${sessionId} granted ${grants.length} server(s), sudo on ${grants.filter((grant) => grant.sudo).length}`)
+    return { grants, allowed: grants.map((grant) => grant.id), sessionId }
   }
 
   throw new ServerError('unknown-endpoint', `unknown endpoint ${JSON.stringify(endpoint)}`)
@@ -641,9 +753,10 @@ async function serveRpc(deps, ctx, req, res) {
 export function apply(ctx) {
   const store = createStore()
   const credentialsOf = () => ctx.get('credentials')
+  const grantsOf = createGrantLookup(ctx, store)
   if (store.warning !== undefined) logDebug(store.warning)
 
-  const deps = { store, credentialsOf }
+  const deps = { store, credentialsOf, grantsOf }
 
   // The browser channel needs the Web carrier — but a fresh boot activates
   // plugins before the carrier exists, so reading the service at `apply` time
@@ -673,8 +786,10 @@ export function apply(ctx) {
     logDebug('rpc channel registered')
   })
 
-  registerTools(ctx, store, credentialsOf)
-  logDebug(`activated with ${store.servers().length} server(s)`)
+  registerTools(ctx, store, credentialsOf, grantsOf)
+  // The suffix is a reload marker: this build is the one whose grants carry a
+  // per-server sudo flag and whose gate walks the delegation chain.
+  logDebug(`activated with ${store.servers().length} server(s); grants carry sudo and inherit down the delegation chain`)
 }
 
 /**
@@ -683,6 +798,8 @@ export function apply(ctx) {
  * `tools` carries the model tools. The browser half resolves the Connection
  * service per request and registers its route through a child context that
  * injects `webServer`, so a composition without either still loads this plugin
- * with its tools only.
+ * with its tools only. `sessions` is read through `ctx.get` rather than
+ * injected: it is needed only to walk the delegation chain for an inherited
+ * grant, and a composition without it should still serve the tools.
  */
 export const inject = ['tools']
