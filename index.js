@@ -403,19 +403,26 @@ function registerTools(ctx, store, credentialsOf, grantsOf) {
           ...(wantsSudo ? { sudo: sudoOptions } : {}),
         })
         const elevated = result.elevated === true
-        const sudoAuthFailed = elevated
+        // A line sudo wrote itself means sudo — not the command — stopped the
+        // run. Classic sudo and sudo-rs both prefix their diagnostics with the
+        // program name and localize only the text after it, so this holds in
+        // any locale; the hint below stays honest about not knowing which of
+        // the two reasons it was.
+        const sudoRefused = elevated
           && typeof result.exitCode === 'number'
           && result.exitCode !== 0
-          && /incorrect password|Sorry, try again|askpass|a password is required/i.test(result.stderr ?? '')
+          && /(^|\n)\s*sudo(-rs)?: /.test(result.stderr ?? '')
         const header = result.ok === true
           ? `${serverLabel(server)} · exit ${result.exitCode}${elevated ? ' · sudo' : ''} · ${result.durationMs} ms`
           : `${server.name} · ${result.error?.stage ?? 'failed'}: ${result.error?.message ?? 'the command did not run'}`
         const lines = [header]
-        if (sudoAuthFailed) {
-          lines.push('', 'sudo rejected the saved sudo password for this server. Ask the user to check it in Settings → Remote SSH; do not guess passwords.')
+        if (sudoRefused) {
+          lines.push('', 'sudo refused to run this command (see its own message above). If that message mentions a password, the saved sudo password for this server is wrong or missing — ask the user to check it in Settings → Remote SSH. Do not guess passwords.')
         }
         if ((result.stdout ?? '') !== '') lines.push('', clip(result.stdout))
-        if ((result.stderr ?? '') !== '') lines.push('', 'stderr:', clip(result.stderr))
+        // sudo-rs emits a bare newline for its empty prompt; a whitespace-only
+        // stderr is not worth a section in the tool result.
+        if ((result.stderr ?? '').trim() !== '') lines.push('', 'stderr:', clip(result.stderr))
         if (result.truncated === true) lines.push('', '(output was truncated by the output limit)')
         return {
           ok: result.ok === true,
@@ -428,8 +435,8 @@ function registerTools(ctx, store, credentialsOf, grantsOf) {
           truncated: result.truncated === true,
           durationMs: result.durationMs ?? null,
           ...(result.ok === true
-            ? (sudoAuthFailed
-              ? { error: { code: 'sudo-auth-failed', stage: 'sudo', message: 'sudo rejected the saved sudo password for this server' } }
+            ? (sudoRefused
+              ? { error: { code: 'sudo-refused', stage: 'sudo', message: 'sudo refused to run the command' } }
               : {})
             : { error: result.error }),
         }

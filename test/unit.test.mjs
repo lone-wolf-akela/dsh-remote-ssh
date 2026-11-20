@@ -549,8 +549,16 @@ async function startSudoServer({ passwordRule }) {
               return
             }
             if (command.includes('sudo -n')) {
-              if (passwordRule.nopasswd === true) finish(0, 'uid=0(root) gid=0(root)\n', '')
-              else finish(1, '', 'sudo: a password is required\n')
+              if (passwordRule.nopasswd === true) {
+                // sudo authenticated (or needed no password) and ran the command:
+                // its own outcome is the answer, whatever that outcome is.
+                const outcome = passwordRule.nopasswdResult ?? { code: 0, stdout: 'uid=0(root) gid=0(root)\n', stderr: '' }
+                finish(outcome.code, outcome.stdout ?? '', outcome.stderr ?? '')
+                return
+              }
+              // The wording differs per sudo implementation and locale, which is
+              // exactly what the transport must not depend on.
+              finish(1, '', passwordRule.denial ?? 'sudo: a password is required\n')
               return
             }
             finish(0, 'plain:' + command + '\n', '')
@@ -643,6 +651,53 @@ await test('sudo: a wrong password reports sudo stderr and leaks nothing', async
     assert.equal(result.stdout.includes('wrong-password'), false)
     assert.equal(result.stderr.includes('wrong-password'), false)
     for (const record of fake.seen) assert.equal(record.command.includes('wrong-password'), false)
+  } finally {
+    await fake.close()
+  }
+})
+
+for (const [label, denial] of [
+  ['classic sudo in a Chinese locale', 'sudo: 需要密码\n'],
+  ['sudo-rs', 'sudo: interactive authentication is required\n'],
+  ['classic sudo with no tty', 'sudo: no tty present and no askpass program specified\n'],
+]) {
+  await test(`sudo: a refusal from ${label} still reaches the password path`, async () => {
+    const { execCommand } = await import('../lib/ssh.js')
+    const fake = await startSudoServer({ passwordRule: { sudo: SUDO_PASSWORD, denial } })
+    try {
+      const target = { host: '127.0.0.1', port: fake.port, username: 'root', auth: { kind: 'password', password: 'login-secret' } }
+      const result = await execCommand(target, 'id -u', { timeoutMs: 10_000, sudo: { password: SUDO_PASSWORD } })
+      assert.equal(result.ok, true, JSON.stringify(result))
+      assert.equal(result.elevated, true)
+      assert.match(result.stdout, /uid=0/)
+      assert.equal(fake.seen.length, 2, 'expected the probe and then the password run')
+      assert.match(fake.seen[1].command, /sudo -S/)
+      for (const record of fake.seen) assert.equal(record.command.includes(SUDO_PASSWORD), false)
+      assert.equal(fake.seen[1].stdin, SUDO_PASSWORD + '\n')
+    } finally {
+      await fake.close()
+    }
+  })
+}
+
+await test('sudo: a command that ran and failed is not retried', async () => {
+  const { execCommand } = await import('../lib/ssh.js')
+  const fake = await startSudoServer({
+    passwordRule: {
+      sudo: SUDO_PASSWORD,
+      nopasswd: true,
+      nopasswdResult: { code: 1, stdout: '', stderr: 'boom\n' },
+    },
+  })
+  try {
+    const target = { host: '127.0.0.1', port: fake.port, username: 'root', auth: { kind: 'password', password: 'login-secret' } }
+    const result = await execCommand(target, 'ls /missing', { timeoutMs: 10_000, sudo: { password: SUDO_PASSWORD } })
+    assert.equal(result.ok, true)
+    assert.equal(result.elevated, true)
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.stderr, 'boom\n')
+    assert.equal(fake.seen.length, 1, 'sudo ran the command, so there is nothing to retry')
+    assert.equal(fake.seen[0].stdin, '')
   } finally {
     await fake.close()
   }

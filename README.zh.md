@@ -57,8 +57,9 @@ plugin_manager install_bundle github:lone-wolf-akela/dsh-remote-ssh
 当某次 `ssh_exec` 要求 sudo 时，传输层在这条 SSH 连接里做下面两步，密码只存在于该通道的 stdin 上：
 
 1. **先试 `sudo -n`，stdin 接 `/dev/null`。** 主机有 NOPASSWD 规则、或 sudo 的时间戳还在缓存里时，命令直接就跑。因为 sudo 被要求绝不提示，保存的密码不可能落进命令自己的输入。
-2. **只有 sudo 以「需要密码」为由拒绝时，才用 `sudo -S` 再试一次**：把保存的密码加换行写到 stdin，随即关闭写端。命令本身此后看到的是 EOF，而不是密码。
-3. **其他任何拒绝都算最终结果** —— 没有 `sudo`、这条命令不在 sudoers 里、`requiretty` —— 它的 stderr 原样作为命令失败返回给模型。sudo 要么认证后 exec，要么拒绝，所以命令不会被执行两次。
+2. **sudo 自己拒绝时，才用 `sudo -S` 再试一次**：把保存的密码加换行写到 stdin，随即关闭写端。命令本身此后看到的是 EOF，而不是密码。
+   判断依据是 sudo 用自己的程序名前缀写出的诊断行 —— 这个前缀不会被翻译：`sudo: a password is required`、`sudo: 需要密码`、`sudo: interactive authentication is required`（sudo-rs）走的是同一条路径，所以本地化主机和 sudo-rs 主机都和普通主机一样可用。
+3. **命令跑过并且失败了，那就是最终结果** —— 不会重跑第二遍，它的 stderr 原样返回给模型。sudo 要么认证后 exec，要么在命令开始前拒绝。
 
 命令被包成 `sudo ... -- /bin/sh -c '<你的命令>'`，这样命令里的管道和重定向也以 root 运行。因此 sudo 授权的是这层包装：sudoers 只放行**具体二进制**（而不是 `ALL`）的主机匹配不上，`ALL=(ALL:ALL) ALL` 这种常见配置则正常。sudo 密码错误会被明确报告，但密码本身不会被打印。
 

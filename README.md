@@ -115,14 +115,16 @@ SSH session, and the password exists only on that channel's stdin:
    NOPASSWD rule, or one where sudo's timestamp is still cached, the command
    simply runs. Because sudo was told never to prompt, the saved password cannot
    end up in the command's own input.
-2. **Only when sudo refuses *for want of a password*, a second attempt uses
-   `sudo -S`**, writes the saved password plus a newline to stdin, and closes the
-   write side straight after. The command itself then sees end-of-file, not the
-   password.
-3. **Any other refusal is final** — no `sudo` binary, no permission for that
-   command, `requiretty` — and its stderr goes back to the model as the command's
-   failure. sudo either authenticates and execs, or refuses, so a command never
-   runs twice.
+2. **When sudo itself refuses, a second attempt uses `sudo -S`**, writes the
+   saved password plus a newline to stdin, and closes the write side straight
+   after. The command itself then sees end-of-file, not the password.
+   A refusal is recognised by the diagnostic sudo writes under its own program
+   name, which is never translated: `sudo: a password is required`,
+   `sudo: 需要密码` and `sudo: interactive authentication is required` (sudo-rs)
+   all take the same path, so a localized or sudo-rs host works like any other.
+3. **A command that ran and failed is the answer already** — it is never re-run,
+   and its own stderr goes back to the model. sudo either authenticates and
+   execs, or refuses before the command starts.
 
 The command is wrapped as `sudo ... -- /bin/sh -c '<your command>'` so that pipes
 and redirections inside it also run as root. The wrapper is therefore what sudo
